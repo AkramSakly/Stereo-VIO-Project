@@ -1,0 +1,148 @@
+import numpy as np
+import pandas as pd
+import cv2
+import os
+import glob
+
+class CompleteVIOEngine:
+    def __init__(self, dataset_name):
+        self.dataset_name = dataset_name
+        self.base_path = os.path.join(r"C:\Users\selva\vio_project", "data", "raw", dataset_name)
+        
+        img_search = glob.glob(os.path.join(self.base_path, "**/cam0/data"), recursive=True)
+        imu_search = glob.glob(os.path.join(self.base_path, "**/imu0/data.csv"), recursive=True)
+        
+        if not img_search or not imu_search:
+            raise FileNotFoundError(f"❌ Missing critical data files in directory: {self.base_path}")
+            
+        self.img_dir = img_search[0]
+        self.imu_file = imu_search[0]
+        
+        self.K = np.array([[190.97, 0.0, 254.93], [0.0, 190.68, 252.50], [0.0, 0.0, 1.0]], dtype=np.float32)
+
+        self.max_features = 1200
+        self.ransac_thresh = 1.0
+        self.min_inliers = 30
+
+        # Kinematic State Vectors
+        self.position = np.zeros((3, 1))
+        self.velocity = np.zeros((3, 1))
+        self.rotation = np.eye(3)
+        self.gyro_bias = np.zeros((3, 1))
+        self.accel_bias = np.zeros((3, 1))
+        self.gravity = np.array([[0.0], [0.0], [9.81]]) # Global Gravity Vector
+        
+        self.trajectory = []
+        self.orb = cv2.ORB_create(nfeatures=self.max_features)
+        self.bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+
+    def load_imu_stream(self):
+        print("📥 Parsing real high-frequency IMU data stream...")
+        df = pd.read_csv(self.imu_file)
+        df.columns = [c.strip().replace('#', '') for c in df.columns]
+        return df.values
+
+    def filter_outliers_ransac(self, kp1, kp2, matches):
+        if len(matches) < 8: return []
+        pts1 = np.float32([kp1[m.queryIdx].pt for m in matches])
+        pts2 = np.float32([kp2[m.trainIdx].pt for m in matches])
+        E, mask = cv2.findEssentialMat(pts1, pts2, self.K, method=cv2.RANSAC, prob=0.999, threshold=self.ransac_thresh)
+        if mask is None: return []
+        return [matches[i] for i in range(len(matches)) if mask[i][0] == 1]
+
+    def propagate_state(self, imu_samples, dt):
+        if len(imu_samples) == 0 or dt <= 0: return
+
+        mean_imu = np.mean(imu_samples, axis=0)
+        gyro_raw = np.array([[mean_imu[1]], [mean_imu[2]], [mean_imu[3]]])
+        accel_raw = np.array([[mean_imu[4]], [mean_imu[5]], [mean_imu[6]]])
+
+        # Apply calibrated bias corrections
+        gyro_corr = gyro_raw - self.gyro_bias
+        accel_corr = accel_raw - self.accel_bias
+
+        # 1. Update Rotation Matrix (Skew-symmetric exponential map)
+        omega_skew = np.array([
+            [0.0, -gyro_corr[2,0], gyro_corr[1,0]],
+            [gyro_corr[2,0], 0.0, -gyro_corr[0,0]],
+            [-gyro_corr[1,0], gyro_corr[0,0], 0.0]
+        ])
+        self.rotation = self.rotation @ (np.eye(3) + omega_skew * dt)
+        
+        # SVD Orthogonalization to completely eliminate numerical scale growth
+        U, _, Vt = np.linalg.svd(self.rotation)
+        self.rotation = U @ Vt
+
+        # 2. Project acceleration to world space and subtract gravity completely
+        accel_world = (self.rotation @ accel_corr) - self.gravity
+
+        # 3. Kinematic Integration (With software clamping to prevent runaway integration)
+        accel_world = np.clip(accel_world, -2.0, 2.0) # Clamp spurious noise spikes
+        
+        self.position += self.velocity * dt + 0.5 * accel_world * (dt ** 2)
+        self.velocity += accel_world * dt
+
+    def run_pipeline(self):
+        imu_data = self.load_imu_stream()
+        frames = sorted(os.listdir(self.img_dir))
+        print(f"🚀 Processing Sequence: {self.dataset_name} | Total Frames: {len(frames)}")
+
+        prev_img = cv2.imread(os.path.join(self.img_dir, frames[0]), 0)
+        prev_kp, prev_des = self.orb.detectAndCompute(prev_img, None)
+        
+        # SAFE TIME PARSING: Keep as pure integer nanoseconds first
+        prev_time_ns = int(os.path.splitext(frames[0])[0])
+
+        for idx in range(1, len(frames)):
+            curr_time_ns = int(os.path.splitext(frames[idx])[0])
+            dt = (curr_time_ns - prev_time_ns) / 1e9 # Exact conversion
+            
+            # Isolate matching IMU samples
+            imu_mask = (imu_data[:, 0] >= prev_time_ns) & (imu_data[:, 0] <= curr_time_ns)
+            frame_imu_samples = imu_data[imu_mask]
+
+            # Track Visual Features
+            curr_img = cv2.imread(os.path.join(self.img_dir, frames[idx]), 0)
+            kp, des = self.orb.detectAndCompute(curr_img, None)
+
+            is_stationary = False
+            if des is not None and prev_des is not None:
+                raw_matches = self.bf.match(prev_des, des)
+                valid_matches = self.filter_outliers_ransac(prev_kp, kp, raw_matches)
+                
+                # Check for Zero Velocity (ZUPT) - If matches barely move, camera is still
+                if len(valid_matches) > 100:
+                    pts1 = np.float32([prev_kp[m.queryIdx].pt for m in valid_matches])
+                    pts2 = np.float32([kp[m.trainIdx].pt for m in valid_matches])
+                    mean_displacement = np.mean(np.linalg.norm(pts1 - pts2, axis=1))
+                    if mean_displacement < 0.15: # Less than 0.15 pixel movement
+                        is_stationary = True
+
+            # State Propagation Gate
+            if is_stationary:
+                self.velocity = np.zeros((3, 1)) # Zero Velocity Update: Kill the velocity drift
+            else:
+                self.propagate_state(frame_imu_samples, dt)
+
+            # Log coordinates
+            self.trajectory.append([curr_time_ns, self.position[0,0], self.position[1,0], self.position[2,0]])
+            
+            prev_time_ns = curr_time_ns
+            prev_kp, prev_des = kp, des
+
+            if idx % 1000 == 0 or idx == len(frames) - 1:
+                print(f"   Processed Frame {idx}/{len(frames)} | Position: [{self.position[0,0]:.2f}, {self.position[1,0]:.2f}, {self.position[2,0]:.2f}]")
+
+        self.save_trajectory()
+
+    def save_trajectory(self):
+        out_path = os.path.join(r"C:\Users\selva\vio_project", f"St_{self.dataset_name}_Akram.txt")
+        df = pd.DataFrame(self.trajectory)
+        df.to_csv(out_path, sep=" ", header=False, index=False)
+        print(f"💾 Trajectory successfully written: {out_path}\n")
+
+if __name__ == "__main__":
+    target_sequences = ["dataset-room2_512_16", "dataset-corridor3_512_16", "dataset-outdoors5_512_16"]
+    for sequence in target_sequences:
+        engine = CompleteVIOEngine(sequence)
+        engine.run_pipeline()
