@@ -47,7 +47,7 @@ python main_outdoor5.py
  Installation
 
 ```bash
-git clone https://github.com/your-username/Stereo-VIO-Pr.git
+git clone https://github.com/AkramSakly
 cd Stereo-VIO-Pr
 pip install -r requirements.txt
 
