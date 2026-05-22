@@ -1,60 +1,46 @@
-# Stereo-VIO-Pr 🚀  
-Visual-Inertial Odometry Pipeline on TUM-VI Benchmark
+# Monocular Visual Odometry with Lightweight IMU Fusion (TUM-VI)
+
+## 📌 Overview
+This project implements a monocular visual odometry (VO) pipeline enhanced with lightweight IMU fusion.  
+The system estimates camera motion using ORB features and classical geometric methods, and is evaluated on the TUM-VI benchmark dataset.
 
 ---
 
-## 📌 Project Overview
-
-This project implements a **Visual Odometry (VO) and Visual-Inertial Odometry (VIO)** pipeline for camera pose estimation using the **TUM-VI dataset**.
-
-The system estimates the camera trajectory using:
-- ORB feature extraction and matching
-- Essential matrix estimation (RANSAC)
-- IMU-based motion smoothing
-- Trajectory evaluation using ATE and RPE metrics
-
-The pipeline is evaluated on:
-- Room2
-- Corridor3
-- Outdoor5
+## 📌 Features
+- Monocular visual odometry (ORB-based)
+- Feature matching with Hamming distance
+- Outlier rejection using Lowe’s ratio test + RANSAC
+- Essential matrix-based motion estimation
+- Lightweight IMU smoothing
+- Evaluation on TUM-VI sequences (Room2, Corridor3, Outdoor5)
 
 ---
 
-## 🧠 Key Features
-
-- Monocular Visual Odometry (VO)
-- Lightweight IMU integration (VIO)
-- Trajectory estimation in metric scale (aligned)
-- Evaluation using:
-  - Absolute Trajectory Error (ATE)
-  - Relative Pose Error (RPE)
-- Visualization of trajectories and drift
-
----
-
-## 📂 Project Structure
-Stereo-VIO-Pr/
-│
-├── vo/
-│ ├── main.py
-│ ├── vo.py
-│ ├── vio.py
-│ ├── loader.py
-│ ├── evaluate.py
-│
-├── data/
-│ ├── raw/
-│ ├── dataset-room2/
-│ ├── dataset-corridor3/
-│ ├── dataset-outdoor5/
-│
-├── results/
-│ ├── trajectory.png
-│ ├── drift.png
-│
+## 📂 Project Structure│
 ├── README.md
 └── requirements.txt
+vo_project/
+│── vo/
+│ │── main.py
+│ │── loader.py
+│ │── imu.py
+│ │── utils.py
+│── data/
+│── results/
+│── requirements.txt
+│── README.md
 
+
+---
+
+## ⚙️ Installation
+
+```bash
+pip install -r requirements.txt
+
+python main_room2.py
+python main_corridor3.py
+python main_outdoor5.py
 
 
 
