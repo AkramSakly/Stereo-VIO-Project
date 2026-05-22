@@ -33,3 +33,51 @@ The pipeline is evaluated on:
 ---
 
 ## 📂 Project Structure
+Stereo-VIO-Pr/
+│
+├── vo/
+│ ├── main.py
+│ ├── vo.py
+│ ├── vio.py
+│ ├── loader.py
+│ ├── evaluate.py
+│
+├── data/
+│ ├── raw/
+│ ├── dataset-room2/
+│ ├── dataset-corridor3/
+│ ├── dataset-outdoor5/
+│
+├── results/
+│ ├── trajectory.png
+│ ├── drift.png
+│
+├── README.md
+└── requirements.txt
+
+
+
+
+ Installation
+
+```bash
+git clone https://github.com/your-username/Stereo-VIO-Pr.git
+cd Stereo-VIO-Pr
+pip install -r requirements.txt
+
+📊 Results
+Room2
+VO ATE: ~1.247
+
+VIO ATE: ~1.245
+
+Corridor3
+VO ATE: ~1.00
+
+VIO ATE: ~1.00
+
+Outdoor5
+VO ATE: ~0.65
+
+VIO ATE: ~0.65
+
