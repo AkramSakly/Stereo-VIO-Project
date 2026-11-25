@@ -1,16 +1,17 @@
 <div align="center">
 
-# Visual and Visual-Inertial Odometry on TUM VI
+# Monocular Visual and Visual-Inertial Odometry on TUM VI
 
-**Monocular visual odometry with ORB features and a lightweight IMU fusion, evaluated against motion-capture ground truth on the TUM VI benchmark**
+**ORB-based monocular visual odometry with a lightweight IMU fusion, evaluated against motion-capture ground truth on three TUM VI sequences**
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![OpenCV](https://img.shields.io/badge/OpenCV-ORB%20%7C%20RANSAC-5C3EE8?logo=opencv&logoColor=white)](https://opencv.org/)
 [![Dataset](https://img.shields.io/badge/Dataset-TUM%20VI-0065BD)](https://cvg.cit.tum.de/data/datasets/visual-inertial-dataset)
+[![Report](https://img.shields.io/badge/Report-IEEE%20format-lightgrey)](docs/report.pdf)
 
-<img src="plot_dataset-corridor3_512_16.png" alt="Estimated top-down trajectory and elevation drift on the TUM VI corridor3 sequence" width="760">
+<img src="docs/images/room2_trajectory.png" alt="Room2: ground truth vs VO vs VIO trajectories" width="620">
 
-<sub>Estimated trajectory (top-down) and elevation drift on <code>dataset-corridor3_512_16</code>.</sub>
+<sub>Room2: motion-capture ground truth (green) vs our VO (red) and VIO (blue) after similarity alignment.</sub>
 
 </div>
 
@@ -18,38 +19,41 @@
 
 ## Highlights
 
-- **Feature-based monocular VO**: ORB keypoints, Hamming brute-force matching, Lowe's ratio test, essential matrix with RANSAC, and relative pose recovery.
-- **IMU fusion**: accelerometer measurements are fused with the VO increments to smooth the trajectory.
-- **Quantitative evaluation**: trajectories are aligned to ground truth with a similarity (Umeyama) alignment, then scored with **Absolute Trajectory Error (ATE)** and **Relative Pose Error (RPE)**.
-- **Three TUM VI sequences** covering indoor, corridor and outdoor scenes.
-- Written report in IEEE format: [`IEEE_Repport_Vo_VIO.pdf`](IEEE_Repport_Vo_VIO.pdf).
+- **Complete feature-based VO front end**: ORB keypoints (8,000 per frame) on histogram-equalised images, brute-force Hamming kNN matching with Lowe's ratio test, essential-matrix estimation with RANSAC, `recoverPose`, and pose chaining.
+- **IMU fusion**: accelerometer readings are fused with the visual increments to smooth the trajectory.
+- **Benchmark evaluation**: trajectories are aligned to motion-capture ground truth with a **Umeyama similarity transform** and scored with **ATE** and **RPE** on three sequences (indoor, low-texture corridor, outdoor).
+- **Real time on CPU**: 33–42 FPS depending on the sequence.
+- **Honest analysis**: the report explains why loosely coupled fusion gives only a marginal gain, and what is needed to fix it.
+- Full write-up in IEEE format: **[docs/report.pdf](docs/report.pdf)**.
 
 ## Pipeline
 
-```
-cam0 images ──► ORB detection ──► kNN matching + ratio test ──► Essential matrix (RANSAC)
-                                                                        │
-                                                                        ▼
-                                                    recoverPose ──► chained pose (VO)
-                                                                        │
-imu0 accelerometer ─────────────────────────────────► IMU fusion ──► VIO trajectory
-                                                                        │
-mocap0 ground truth ──► Umeyama alignment ──► ATE / RPE ──► plots + CSV
-```
+<p align="center"><img src="docs/images/pipeline.png" alt="Pipeline: images, ORB, matching, essential matrix, recoverPose, IMU fusion, evaluation" width="900"></p>
 
 ## Results
 
-ATE after similarity alignment to motion-capture ground truth (metres, lower is better):
+<p align="center"><img src="docs/images/ate_comparison.png" alt="ATE per sequence for VO and VIO" width="560"></p>
 
-| Sequence | Scene | VO ATE | VIO ATE |
-|---|---|---|---|
-| `dataset-room2_512_16` | Indoor room | ~1.25 | ~1.25 |
-| `dataset-corridor3_512_16` | Corridor | ~1.00 | ~1.00 |
-| `dataset-outdoors5_512_16` | Outdoor | ~0.65 | ~0.65 |
+| Sequence | Scene | VO ATE (m) | VIO ATE (m) | VO RPE | VIO RPE | FPS (VO / VIO) |
+|---|---|---|---|---|---|---|
+| `room2_512_16` | Indoor room, rich texture | 1.247 | 1.245 | 0.0968 | 0.0965 | 41 / 39 |
+| `corridor3_512_16` | Corridor, low texture | 1.003 | 1.003 | 0.0102 | 0.0102 | 42 / 40 |
+| `outdoors5_512_16` | Outdoor | ~0.65 | ~0.65 | – | – | 35 / 33 |
 
-**Discussion.** Monocular VO cannot observe metric scale, so translation drifts over long sequences (visible in the elevation plot above). The current IMU term acts as a smoothing filter and gives only a marginal change in ATE. A tightly coupled approach (IMU pre-integration with a sliding-window optimiser) is the natural next step; prototypes are in [`vo/imu_preintegration.py`](vo/imu_preintegration.py) and [`vo/sliding_window_vio.py`](vo/sliding_window_vio.py).
+### Trajectories and drift
 
-More figures (trajectories, error over time, accuracy summaries) are in the repository root, one set per sequence.
+| | Trajectory (GT vs VO vs VIO) | Drift over time |
+|---|---|---|
+| **Room2** | <img src="docs/images/room2_trajectory.png" width="380"> | <img src="docs/images/room2_drift.png" width="380"> |
+| **Corridor3** | <img src="docs/images/corridor3_trajectory.png" width="380"> | <img src="docs/images/corridor3_drift.png" width="380"> |
+| **Outdoors5** | <img src="docs/images/outdoor5_trajectory.png" width="380"> | <img src="docs/images/outdoor5_drift.png" width="380"> |
+
+### What the results show
+
+- **Vision dominates.** VO and VIO are almost identical (≈0.2% ATE gain on Room2), so the current IMU term acts as a smoother, not a drift corrector.
+- **Monocular scale is the main error source.** The estimated trajectories have the right local shape but the wrong extent and accumulate drift, which is expected without metric scale.
+- **Texture matters.** The low-texture corridor is the hardest case for the ORB front end.
+- **Next steps:** IMU pre-integration on SO(3) with bias estimation, a sliding-window optimiser (tightly coupled VIO), stereo triangulation for metric scale, and loop closure. Early stereo and back-end prototypes are in [`experiments/stereo_vio/`](experiments/stereo_vio/). They are work in progress and are not part of the reported results.
 
 ## Getting started
 
@@ -64,7 +68,7 @@ pip install -r requirements.txt
 
 ### 2. Download the data
 
-Download the 512×512 **Euroc/DSO** exports of `room2`, `corridor3` and `outdoors5` from the [TUM VI dataset page](https://cvg.cit.tum.de/data/datasets/visual-inertial-dataset) and extract them so the layout is:
+Download the 512×512 **Euroc/DSO** exports of `room2`, `corridor3` and `outdoors5` from the [TUM VI dataset page](https://cvg.cit.tum.de/data/datasets/visual-inertial-dataset), and extract them like this:
 
 ```
 data/
@@ -73,37 +77,35 @@ data/
 └── dataset-outdoors5_512_16/mav0/...
 ```
 
-To keep the data elsewhere, set `TUMVI_ROOT` to the folder that contains the `dataset-*` folders.
-
 ### 3. Run
 
 ```bash
+export TUMVI_ROOT=$PWD/data      # Windows (PowerShell): $env:TUMVI_ROOT="$PWD\data"
 cd vo
-export TUMVI_ROOT=../data        # Windows (PowerShell): $env:TUMVI_ROOT="..\data"
 python main_room2.py
 python main_corridor3.py
 python main_outdoor5.py
 ```
 
-Each script prints VO/VIO ATE and RPE and writes plots to `vo/results/`.
+Each script prints the VO/VIO ATE and RPE, and saves the trajectory and drift plots to `vo/results/`.
 
 ## Repository structure
 
 ```
 vo/
 ├── main_room2.py, main_corridor3.py, main_outdoor5.py   # one entry point per sequence
-├── loader.py              # TUM VI images, IMU and ground-truth loading
-├── vo.py                  # MonocularVO: ORB + essential matrix + pose chaining
-├── vio.py                 # SimpleVIO: VO + accelerometer fusion
-├── evaluate.py            # Umeyama alignment, ATE, RPE
-├── imu_preintegration.py  # IMU pre-integration (prototype)
-├── sliding_window_vio.py  # sliding-window optimisation (prototype)
-└── ekf_vio.py, vio_vins.py, vio_sw.py, optimizer.py      # alternative fusion experiments
-*.png, *.csv, *.txt        # figures and estimated trajectories per sequence
-IEEE_Repport_Vo_VIO.pdf    # project report
+├── loader.py        # TUM VI images, IMU and ground-truth loading
+├── vo.py            # MonocularVO: ORB + essential matrix + pose chaining
+├── vio.py           # SimpleVIO: VO + accelerometer fusion
+└── evaluate.py      # Umeyama alignment, ATE, RPE
+docs/
+├── report.pdf       # IEEE-format project report
+└── images/          # figures used in this README
+experiments/stereo_vio/   # work-in-progress stereo front end and optimisation back end
 ```
 
-## Author
+## Authors
 
-**Akram Sakly**, Research Master's in Computer Vision, Université de Bourgogne (Le Creusot, France)
-[GitHub](https://github.com/AkramSakly) · [LinkedIn](https://www.linkedin.com/in/akram-sakly)
+**Akram Sakly** and **Oussama Garbaa Chtioui**, Master's VIBOT (Computer Vision), Université Bourgogne Europe, Le Creusot, France.
+
+Contact: [Akram Sakly on GitHub](https://github.com/AkramSakly) · [LinkedIn](https://www.linkedin.com/in/akram-sakly)
