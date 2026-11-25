@@ -17,7 +17,7 @@ from evaluate import compute_ate, compute_rpe, align_umeyama
 # DATASET PATH
 # =====================
 
-DATASET = r"C:\Users\selva\vio_project\data\raw\dataset-room2_512_16\mav0"
+DATASET = os.path.join(os.environ.get("TUMVI_ROOT", "data"), "dataset-room2_512_16", "mav0")
 
 CAM_DIR = os.path.join(DATASET, "cam0", "data")
 IMU_CSV = os.path.join(DATASET, "imu0", "data.csv")
